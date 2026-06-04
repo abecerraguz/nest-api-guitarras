@@ -1,190 +1,173 @@
-# Guía de entrevista NestJS — Proyecto Guitarras API
+# Guía de Entrevista — Guitarras API (NestJS + Arquitectura Hexagonal)
 
-> Este archivo explica **cada carpeta y archivo** del proyecto para que puedas entender qué hace cada cosa y defenderte en una entrevista técnica.
+> Referencia rápida para defender el proyecto en entrevista técnica.  
+> Stack: **NestJS · TypeScript · TypeORM · PostgreSQL · JWT · Docker · GitHub Actions**
 
 ---
 
 ## Índice
 
-### Estructura y arranque
-- [Estructura completa del proyecto](#estructura-completa-del-proyecto)
-- [¿Qué son los pipes globales?](#srcmaints)
-- [¿Qué es un módulo en NestJS?](#srcappmodulets)
-
-### Configuración
-- [¿Cómo se configura la base de datos?](#srcconfig)
-- [¿Qué es `synchronize` en TypeORM?](#databaseconfigts)
-- [¿Para qué sirven las migraciones?](#typeorm-cliconfigts)
-
-### Capa compartida (shared)
-- [¿Qué es un Filter en NestJS?](#http-exception-filterts--formateador-de-errores)
-- [¿Qué es un Interceptor en NestJS?](#response-interceptorts--formateador-de-respuestas-exitosas)
-- [¿Qué es un Decorator personalizado?](#roles-decoratorts--decorador-personalizado)
-
-### Módulo Guitars — Arquitectura Hexagonal
-- [¿Qué es la arquitectura hexagonal?](#carpeta-srcmodulesguitars)
-- [¿Qué es el Domain y por qué no usa NestJS?](#capa-1--domain)
-- [¿Qué es un Puerto (Port)?](#domainrepositoriesguitar-repository-portts)
-- [¿Qué es un Caso de Uso (Use Case)?](#capa-2--applicationuse-cases)
-- [¿Por qué usas una interfaz para el repositorio?](#domainrepositoriesguitar-repository-portts)
-- [¿Qué hace el adaptador TypeORM?](#capa-3--infrastructure)
-- [¿Qué es un DTO?](#interfacedtoscreate-guitar-dtots)
-- [¿Qué hace el Controller?](#guitarscontrollerts)
-- [¿Cómo funciona la inyección de dependencias?](#guitarsmodulets--el-pegamento)
-
-### Módulo Auth
-- [¿Por qué dos tokens JWT?](#sistema-jwt-de-doble-token)
-- [¿Qué es un Guard en NestJS?](#infrastructure)
-- [¿Cómo funciona el logout con JWT?](#sistema-jwt-de-doble-token)
-
-### Flujo completo
-- [¿Qué pasa desde que llega una petición hasta la respuesta?](#flujo-completo-de-una-petición-post-apiv1guitarras)
-
-### Resumen rápido
-- [Tabla de conceptos para la entrevista](#resumen-de-conceptos-para-la-entrevista)
+- [Estructura del proyecto](#estructura-del-proyecto)
+- [Arranque y configuración global](#arranque-y-configuración-global)
+- [Configuración de base de datos](#configuración-de-base-de-datos)
+- [Capa compartida (shared)](#capa-compartida-shared)
+- [Módulo Guitars — Arquitectura Hexagonal](#módulo-guitars--arquitectura-hexagonal)
+  - [Capa 1: Domain](#capa-1--domain)
+  - [Capa 2: Application](#capa-2--application)
+  - [Capa 3: Infrastructure](#capa-3--infrastructure)
+  - [Capa 4: Interface](#capa-4--interface)
+  - [El módulo como pegamento](#guitarsmodulets--el-pegamento)
+- [Módulo Auth](#módulo-auth)
+- [Flujo completo de una petición](#flujo-completo-post-apiv1guitarras)
+- [Preguntas frecuentes de entrevista](#preguntas-frecuentes-de-entrevista)
+- [Tabla de conceptos clave](#tabla-de-conceptos-clave)
 
 ---
 
-## Estructura completa del proyecto
+## Estructura del proyecto
 
 ```
 nest-api/
 ├── src/
-│   ├── main.ts                  ← Punto de entrada
-│   ├── app.module.ts            ← Módulo raíz
-│   ├── config/                  ← Configuración de base de datos
-│   ├── shared/                  ← Código reutilizable en todos los módulos
+│   ├── main.ts                   ← Punto de entrada, configuración global
+│   ├── app.module.ts             ← Módulo raíz, registra todos los módulos
+│   ├── config/                   ← Configuración de BD y TypeORM CLI
+│   ├── shared/                   ← Código transversal (filtros, interceptores, decoradores)
 │   ├── modules/
-│   │   ├── guitars/             ← Todo lo relacionado con guitarras
-│   │   └── auth/                ← Todo lo relacionado con autenticación
+│   │   ├── guitars/              ← CRUD de guitarras con arquitectura hexagonal
+│   │   └── auth/                 ← Autenticación JWT de doble token
 │   └── database/
-│       └── seeds/               ← Datos iniciales al arrancar
+│       └── seeds/                ← Datos iniciales al arrancar
 ├── Dockerfile
 ├── docker-compose.yml
-└── .github/workflows/           ← CI/CD automatizado
+└── .github/workflows/            ← Pipeline CI/CD
 ```
 
 ---
 
-## Archivos de arranque
+## Arranque y configuración global
 
 ### `src/main.ts`
 
-Es el **primer archivo que ejecuta Node**. Es como el `index.js` de Express pero de NestJS.
+Punto de entrada de la aplicación. Configura todo lo que aplica **globalmente** antes de levantar el servidor.
 
 ```typescript
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  app.setGlobalPrefix('api');         // Todas las rutas empiezan con /api
-  app.enableVersioning(...);           // Las rutas quedan como /api/v1/...
-  app.useGlobalPipes(new ValidationPipe()); // Valida automáticamente todos los body
-  app.useGlobalFilters(...);           // Captura todos los errores
-  app.useGlobalInterceptors(...);      // Transforma todas las respuestas
+  app.setGlobalPrefix('api');
+  app.enableVersioning({ type: VersioningType.URI }); // /api/v1/...
+
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,      // elimina campos no declarados en el DTO
+    forbidNonWhitelisted: true,
+    transform: true,      // convierte strings a number/boolean automáticamente
+  }));
+
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new ResponseInterceptor());
 
   await app.listen(3000);
 }
 ```
 
-**Pregunta de entrevista:** *¿Qué son los pipes globales?*
-> Son filtros que se ejecutan antes de cada controller. `ValidationPipe` revisa que el body cumpla las reglas del DTO. Si no cumple, devuelve un 400 automáticamente.
-
----
+**Por qué `whitelist: true`:** si el cliente manda campos extra no declarados en el DTO, NestJS los descarta silenciosamente. Evita inyección de propiedades no esperadas.
 
 ### `src/app.module.ts`
 
-Es el **módulo raíz** — registra todos los demás módulos.
+Módulo raíz que importa y conecta todos los módulos de la aplicación.
 
 ```typescript
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),  // Variables de entorno disponibles en toda la app
-    TypeOrmModule.forRootAsync({ ... }),        // Conexión a PostgreSQL
-    AuthModule,                                 // Módulo de autenticación
-    GuitarsModule,                              // Módulo de guitarras
-    SeedModule,                                 // Datos iniciales
+    ConfigModule.forRoot({ isGlobal: true }),   // .env disponible en toda la app
+    TypeOrmModule.forRootAsync({ ... }),         // conexión PostgreSQL
+    AuthModule,
+    GuitarsModule,
+    SeedModule,
   ],
 })
 export class AppModule {}
 ```
 
-**Pregunta de entrevista:** *¿Qué es un módulo en NestJS?*
-> Es un contenedor que agrupa controladores, servicios y repositorios relacionados. Equivale a una "sección" de la aplicación. NestJS construye un grafo con todos los módulos para resolver las dependencias.
-
 ---
 
-## Carpeta `src/config/`
+## Configuración de base de datos
 
-### `database.config.ts`
-
-Configura la conexión a PostgreSQL leyendo las variables del `.env`.
+### `src/config/database.config.ts`
 
 ```typescript
 export const databaseConfig = (configService: ConfigService) => ({
   type: 'postgres',
-  host: configService.get('DB_HOST'),      // Lee DB_HOST del .env
-  port: configService.get('DB_PORT'),
+  host: configService.get('DB_HOST'),
+  port: configService.get<number>('DB_PORT'),
   database: configService.get('DB_DATABASE'),
-  synchronize: NODE_ENV !== 'production',  // En dev crea las tablas automático
-                                           // En producción se usan migraciones
+  synchronize: process.env.NODE_ENV !== 'production',
+  // En desarrollo: TypeORM sincroniza el esquema automáticamente.
+  // En producción: se usan migraciones para evitar pérdida accidental de datos.
 });
 ```
 
-### `typeorm-cli.config.ts`
+### `src/config/typeorm-cli.config.ts`
 
-Solo sirve para correr comandos de migración desde la terminal:
+Configuración exclusiva para la CLI de TypeORM. Permite correr migraciones desde terminal:
+
 ```bash
 npm run migration:generate -- --name CrearTablaGuitarras
 npm run migration:run
+npm run migration:revert
 ```
+
+> Las migraciones son archivos versionados que describen cada cambio de esquema. Son el equivalente a un `git` para la base de datos.
 
 ---
 
-## Carpeta `src/shared/`
+## Capa compartida (shared)
 
-Código **transversal** que usan todos los módulos.
+Código reutilizable por todos los módulos: manejo de errores, formato de respuestas y decoradores de autorización.
 
 ```
 shared/
 ├── domain/
 │   └── exceptions/
-│       └── api.exception.ts          ← Error personalizado con statusCode
+│       └── api.exception.ts          ← Error de negocio con statusCode
 └── infrastructure/
     ├── filters/
-    │   └── http-exception.filter.ts  ← Captura todos los errores y formatea la respuesta
+    │   └── http-exception.filter.ts  ← Captura todos los errores → JSON uniforme
     ├── interceptors/
-    │   └── response.interceptor.ts   ← Envuelve las respuestas exitosas
+    │   └── response.interceptor.ts   ← Envuelve respuestas exitosas → JSON uniforme
     └── decorators/
         └── roles.decorator.ts        ← @Roles('admin') para proteger rutas
 ```
 
-### `api.exception.ts` — Error personalizado
+### `api.exception.ts` — Error de dominio personalizado
+
+Permite lanzar errores con código HTTP desde cualquier capa sin acoplar la lógica de negocio a NestJS:
 
 ```typescript
-// En lugar de hacer esto:
-res.status(404).json({ error: 'No encontrado' })
-
-// Hacemos esto desde cualquier servicio:
+// Desde un caso de uso o entidad de dominio:
 throw new ApiException(404, 'Guitarra no encontrada');
-// El filter lo captura y devuelve el JSON formateado automáticamente
+// El filter global lo captura y devuelve el JSON correcto automáticamente.
 ```
 
-### `http-exception.filter.ts` — Formateador de errores
+### `http-exception.filter.ts` — Formato de error uniforme
 
-Captura **cualquier error** de la aplicación y devuelve siempre el mismo formato:
+Garantiza que **todos** los errores de la API tengan la misma estructura:
+
 ```json
 {
   "status": "error",
   "code": 404,
   "message": "Guitarra no encontrada",
-  "timestamp": "2026-06-04T...",
-  "path": "/api/v1/guitarras/123"
+  "timestamp": "2026-06-04T12:00:00.000Z",
+  "path": "/api/v1/guitarras/abc"
 }
 ```
 
-### `response.interceptor.ts` — Formateador de respuestas exitosas
+### `response.interceptor.ts` — Formato de éxito uniforme
 
-Envuelve automáticamente todas las respuestas en:
+Envuelve automáticamente cualquier respuesta exitosa:
+
 ```json
 {
   "status": "success",
@@ -197,36 +180,36 @@ Envuelve automáticamente todas las respuestas en:
 ### `roles.decorator.ts` — Decorador personalizado
 
 ```typescript
-// Define qué roles pueden acceder a una ruta
-@Roles('admin')
+@Roles('admin')   // Guarda metadata: solo 'admin' puede ejecutar este handler
 @Post()
 create() { ... }
+// RolesGuard lee esa metadata y compara con req.user.role
 ```
 
 ---
 
-## Carpeta `src/modules/guitars/`
+## Módulo Guitars — Arquitectura Hexagonal
 
-Este es el **corazón** del proyecto. Está dividido en 4 capas (arquitectura hexagonal).
+El módulo está dividido en **4 capas**. La regla fundamental:
+
+> **Las dependencias apuntan hacia adentro.** Infraestructura conoce a aplicación; aplicación conoce a dominio; dominio no conoce a nadie.
 
 ```
 guitars/
-├── domain/          ← CAPA 1: Reglas de negocio puras
-├── application/     ← CAPA 2: Casos de uso (qué puede hacer el sistema)
-├── infrastructure/  ← CAPA 3: Implementaciones concretas (PostgreSQL, etc.)
-├── interface/       ← CAPA 4: Entrada/salida HTTP
+├── domain/          ← Reglas de negocio puras. Sin NestJS, sin TypeORM.
+├── application/     ← Casos de uso. Orquesta el flujo usando puertos.
+├── infrastructure/  ← Implementaciones concretas (PostgreSQL, Redis, etc.)
+├── interface/       ← Entrada HTTP: controladores y DTOs.
 └── guitars.module.ts
 ```
 
 ---
 
-### CAPA 1 — `domain/`
+### Capa 1 — Domain
 
-**Regla:** no importa nada de NestJS, Express ni TypeORM. Solo TypeScript puro.
+**Sin dependencias externas.** Solo TypeScript puro. Aquí vive lo que el negocio considera una guitarra y qué se puede hacer con ella.
 
 #### `domain/entities/guitar.entity.ts`
-
-La guitarra "ideal" — define qué **es** una guitarra para el negocio:
 
 ```typescript
 export class Guitar {
@@ -235,29 +218,28 @@ export class Guitar {
   brand: string;
   value: number;
   stock: number;
-  // ...
 
-  // Crea una guitarra nueva con ID automático
-  static create(data): Guitar {
+  // Factory method: crea una guitarra nueva con ID generado automáticamente.
+  static create(data: CreateGuitarProps): Guitar {
     return new Guitar({ ...data, id: randomUUID(), createdAt: new Date() });
   }
 
-  // Devuelve una copia modificada (no modifica el original)
-  update(changes): Guitar {
+  // Devuelve una copia modificada sin mutar el original (inmutabilidad).
+  update(changes: Partial<Guitar>): Guitar {
     return new Guitar({ ...this, ...changes, updatedAt: new Date() });
   }
 }
 ```
 
-> Esta clase no sabe si se guarda en PostgreSQL, MongoDB o un archivo JSON.
+Esta entidad no sabe si se persiste en PostgreSQL, MongoDB o un archivo de texto.
 
 #### `domain/repositories/guitar.repository.port.ts`
 
-Define el **contrato** de lo que se puede hacer con guitarras en la base de datos:
+Define el **contrato** (puerto) de lo que se puede hacer con guitarras en persistencia:
 
 ```typescript
 export interface GuitarRepositoryPort {
-  findAll(options): Promise<PaginatedResult<Guitar>>;
+  findAll(options: GuitarQueryOptions): Promise<PaginatedResult<Guitar>>;
   findById(id: string): Promise<Guitar | null>;
   findByName(name: string): Promise<Guitar | null>;
   save(guitar: Guitar): Promise<Guitar>;
@@ -265,113 +247,110 @@ export interface GuitarRepositoryPort {
 }
 ```
 
-> Es solo una interfaz. No tiene código real. El "cómo" se implementa está en la capa de infraestructura.
-
-**Pregunta de entrevista:** *¿Por qué usas una interfaz para el repositorio?*
-> Porque el caso de uso depende de la abstracción (interfaz), no de la implementación concreta. Si mañana cambio PostgreSQL por MongoDB, solo cambio el adaptador, sin tocar la lógica de negocio.
+Es solo una interfaz. La implementación concreta está en la capa de infraestructura.
 
 ---
 
-### CAPA 2 — `application/use-cases/`
+### Capa 2 — Application
 
-Cada archivo representa **una acción** que el sistema puede hacer.
+Cada archivo es un **caso de uso**: una acción atómica que el sistema puede realizar.
 
 ```
-use-cases/
-├── get-all-guitars.use-case.ts    ← Listar guitarras con filtros y paginación
-├── get-guitar-by-id.use-case.ts   ← Obtener una guitarra por ID
-├── create-guitar.use-case.ts      ← Crear guitarra (verifica duplicados)
-├── replace-guitar.use-case.ts     ← PUT: reemplazar guitarra completa
-├── patch-guitar.use-case.ts       ← PATCH: actualizar campos sueltos
-└── delete-guitar.use-case.ts      ← Eliminar guitarra
+application/use-cases/
+├── get-all-guitars.use-case.ts
+├── get-guitar-by-id.use-case.ts
+├── create-guitar.use-case.ts
+├── replace-guitar.use-case.ts
+├── patch-guitar.use-case.ts
+└── delete-guitar.use-case.ts
 ```
 
-Ejemplo del caso de uso de crear:
+#### Ejemplo: `create-guitar.use-case.ts`
 
 ```typescript
 @Injectable()
 export class CreateGuitarUseCase {
   constructor(
-    @Inject(GUITAR_REPOSITORY_PORT)   // ← Recibe la INTERFAZ, no la clase concreta
-    private readonly repo: GuitarRepositoryPort,
+    @Inject(GUITAR_REPOSITORY_PORT)
+    private readonly repo: GuitarRepositoryPort,   // ← interfaz, no implementación
   ) {}
 
   async execute(dto: CreateGuitarDto): Promise<Guitar> {
-    // Regla de negocio: no pueden existir dos guitarras con el mismo nombre
+    // Regla de negocio: nombre único
     const existing = await this.repo.findByName(dto.name);
     if (existing) {
       throw new ConflictException('Ya existe una guitarra con ese nombre');
     }
 
-    const guitar = Guitar.create(dto);        // Crea la entidad de dominio
-    return this.repo.save(guitar);            // Persiste usando el puerto
+    const guitar = Guitar.create(dto);   // crea entidad de dominio con UUID
+    return this.repo.save(guitar);       // persiste a través del puerto
   }
 }
 ```
 
-**Pregunta de entrevista:** *¿Qué es un caso de uso?*
-> Es una clase que encapsula una única acción del sistema. Contiene la lógica de negocio y orquesta el flujo: valida, crea entidades, llama al repositorio. Un controller puede llamar a varios casos de uso pero un caso de uso no llama a controllers.
+El caso de uso no sabe qué base de datos hay detrás. Depende de la interfaz `GuitarRepositoryPort`, no de TypeORM.
 
 ---
 
-### CAPA 3 — `infrastructure/`
+### Capa 3 — Infrastructure
 
-Las implementaciones **concretas** que dependen de tecnologías externas.
+Implementaciones concretas que dependen de tecnologías externas.
 
 ```
 infrastructure/
 └── persistence/
-    ├── guitar.typeorm-entity.ts      ← Tabla de PostgreSQL
+    ├── guitar.typeorm-entity.ts      ← Definición de la tabla PostgreSQL
     └── guitar.typeorm-repository.ts  ← Implementa GuitarRepositoryPort con TypeORM
 ```
 
-#### `guitar.typeorm-entity.ts`
-
-Define la tabla de PostgreSQL:
+#### `guitar.typeorm-entity.ts` — Tabla de base de datos
 
 ```typescript
-@Entity('guitars')                        // nombre de la tabla en la BD
+@Entity('guitars')
 export class GuitarTypeOrmEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ unique: true })               // columna con restricción UNIQUE
+  @Column({ unique: true })
   name: string;
 
-  @Column({ type: 'decimal' })
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
   value: number;
 
-  @CreateDateColumn()                     // TypeORM la rellena automáticamente
+  @CreateDateColumn()
   createdAt: Date;
 
-  // Convierte fila de BD → entidad de dominio
-  toDomain(): Guitar { return new Guitar({ ...this }); }
+  // Conversión bidireccional entre BD y dominio
+  toDomain(): Guitar {
+    return new Guitar({ ...this });
+  }
 
-  // Convierte entidad de dominio → fila de BD
-  static fromDomain(guitar: Guitar): GuitarTypeOrmEntity { ... }
+  static fromDomain(guitar: Guitar): GuitarTypeOrmEntity {
+    const entity = new GuitarTypeOrmEntity();
+    Object.assign(entity, guitar);
+    return entity;
+  }
 }
 ```
 
-#### `guitar.typeorm-repository.ts`
-
-**Implementa** el puerto `GuitarRepositoryPort` usando TypeORM y PostgreSQL:
+#### `guitar.typeorm-repository.ts` — Adaptador concreto
 
 ```typescript
 @Injectable()
 export class GuitarTypeOrmRepository implements GuitarRepositoryPort {
 
-  async findAll(options): Promise<PaginatedResult<Guitar>> {
-    // Construye la query con filtros, ordenamiento y paginación
+  async findAll({ q, page, limit, sortBy, order }): Promise<PaginatedResult<Guitar>> {
     const [entities, total] = await this.repo
       .createQueryBuilder('guitar')
-      .where('guitar.name ILIKE :q', { q: `%${options.q}%` })
+      .where('guitar.name ILIKE :q', { q: `%${q}%` })
+      .orderBy(`guitar.${sortBy}`, order)
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
 
     return {
-      items: entities.map(e => e.toDomain()),    // BD → dominio
-      meta: { total, page, totalPages, ... }
+      items: entities.map(e => e.toDomain()),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
 
@@ -385,226 +364,274 @@ export class GuitarTypeOrmRepository implements GuitarRepositoryPort {
 
 ---
 
-### CAPA 4 — `interface/`
+### Capa 4 — Interface
 
-Todo lo que tiene que ver con **HTTP**: recibe peticiones, devuelve respuestas.
+Todo lo relacionado con la entrada y salida HTTP.
 
 ```
 interface/
 ├── controllers/
-│   └── guitars.controller.ts    ← Define las rutas
+│   └── guitars.controller.ts
 └── dtos/
-    ├── create-guitar.dto.ts     ← Reglas de validación para POST/PUT
-    └── patch-guitar.dto.ts      ← Reglas de validación para PATCH (campos opcionales)
+    ├── create-guitar.dto.ts     ← Validación para POST y PUT
+    ├── patch-guitar.dto.ts      ← Validación para PATCH (todos opcionales)
+    └── guitar-query.dto.ts      ← Validación de query params
 ```
 
-#### `create-guitar.dto.ts`
-
-Define qué debe enviar el cliente y qué reglas deben cumplirse:
+#### `create-guitar.dto.ts` — Validación automática
 
 ```typescript
 export class CreateGuitarDto {
   @IsString()
   @IsNotEmpty()
-  name: string;           // Obligatorio, no puede estar vacío
+  @MaxLength(100)
+  name: string;
 
-  @IsNumber()
+  @IsString()
+  @IsNotEmpty()
+  brand: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  value: number;          // Obligatorio, mínimo 0
+  value: number;
 
   @IsInt()
   @Min(0)
   stock: number;
 }
-// Si el cliente manda un campo extra que no está aquí,
-// ValidationPipe lo elimina automáticamente (whitelist: true)
 ```
 
-#### `guitars.controller.ts`
+`ValidationPipe` rechaza automáticamente cualquier request que no cumpla estas reglas, devolviendo un `422` con detalle de cada campo inválido.
 
-Recibe HTTP, llama al caso de uso correcto, devuelve JSON:
+#### `guitars.controller.ts` — Rutas HTTP
 
 ```typescript
-@Controller({ path: 'guitarras', version: '1' })  // /api/v1/guitarras
-@UseGuards(JwtAuthGuard)                           // Todas las rutas requieren token
+@Controller({ path: 'guitarras', version: '1' })
+@UseGuards(JwtAuthGuard)
 export class GuitarsController {
 
+  constructor(
+    private readonly getAllGuitarsUseCase: GetAllGuitarsUseCase,
+    private readonly getGuitarByIdUseCase: GetGuitarByIdUseCase,
+    private readonly createGuitarUseCase: CreateGuitarUseCase,
+    private readonly replaceGuitarUseCase: ReplaceGuitarUseCase,
+    private readonly patchGuitarUseCase: PatchGuitarUseCase,
+    private readonly deleteGuitarUseCase: DeleteGuitarUseCase,
+  ) {}
+
   @Get()
-  async findAll(@Query() query: GuitarQueryDto) {
-    // 1. Query params validados automáticamente por ValidationPipe
-    const { items, meta } = await this.getAllGuitarsUseCase.execute(query);
-    // 2. Devuelve respuesta formateada
-    return { status: 'success', data: items, meta };
+  findAll(@Query() query: GuitarQueryDto) {
+    return this.getAllGuitarsUseCase.execute(query);
+  }
+
+  @Get(':id')
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.getGuitarByIdUseCase.execute(id);
   }
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles('admin')                                  // Solo admin puede crear
-  async create(@Body() dto: CreateGuitarDto) {
-    const guitar = await this.createGuitarUseCase.execute(dto);
-    return { status: 'success', data: guitar };
+  @Roles('admin')
+  create(@Body() dto: CreateGuitarDto) {
+    return this.createGuitarUseCase.execute(dto);
+  }
+
+  @Put(':id')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  replace(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateGuitarDto) {
+    return this.replaceGuitarUseCase.execute(id, dto);
+  }
+
+  @Patch(':id')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  patch(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PatchGuitarDto) {
+    return this.patchGuitarUseCase.execute(id, dto);
+  }
+
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.deleteGuitarUseCase.execute(id);
   }
 }
 ```
 
 ---
 
-### `guitars.module.ts` — el pegamento
+### `guitars.module.ts` — El pegamento
 
-Conecta todas las capas. Le dice a NestJS:
-- *"Cuando alguien pida `GuitarRepositoryPort`, dale `GuitarTypeOrmRepository`"*
+Conecta las 4 capas mediante inyección de dependencias. NestJS lee este archivo para saber qué instanciar y cómo conectarlo.
 
 ```typescript
 @Module({
+  imports: [
+    TypeOrmModule.forFeature([GuitarTypeOrmEntity]),
+  ],
   providers: [
+    // Vincula el puerto (interfaz) con el adaptador (implementación concreta)
     {
-      provide: GUITAR_REPOSITORY_PORT,        // ← la INTERFAZ (el contrato)
-      useClass: GuitarTypeOrmRepository,      // ← la IMPLEMENTACIÓN concreta
+      provide: GUITAR_REPOSITORY_PORT,
+      useClass: GuitarTypeOrmRepository,
     },
-    CreateGuitarUseCase,
+    // Casos de uso
     GetAllGuitarsUseCase,
-    // ... todos los casos de uso
+    GetGuitarByIdUseCase,
+    CreateGuitarUseCase,
+    ReplaceGuitarUseCase,
+    PatchGuitarUseCase,
+    DeleteGuitarUseCase,
   ],
   controllers: [GuitarsController],
 })
 export class GuitarsModule {}
 ```
 
-**Esto es la inyección de dependencias:** NestJS crea `GuitarTypeOrmRepository` y se lo pasa a `CreateGuitarUseCase` automáticamente, sin que tengas que escribir `new GuitarTypeOrmRepository()` en ningún lado.
+Si mañana se cambia PostgreSQL por MongoDB, solo se cambia `useClass: GuitarTypeOrmRepository` por `useClass: MongoGuitarRepository`. Los casos de uso y el dominio no se tocan.
 
 ---
 
-## Carpeta `src/modules/auth/`
+## Módulo Auth
 
-Misma estructura que `guitars/` pero para autenticación.
+Misma estructura hexagonal que `guitars/`. Implementa autenticación con **par de tokens JWT**.
 
 ```
 auth/
 ├── domain/
-│   ├── entities/user.entity.ts              ← Entidad Usuario (id, email, role)
+│   ├── entities/user.entity.ts
 │   └── repositories/
-│       ├── user.repository.port.ts          ← Contrato: buscar usuario por email/id
-│       └── token-store.port.ts              ← Contrato: blacklist de tokens revocados
+│       ├── user.repository.port.ts        ← buscar usuario por email/id
+│       └── token-store.port.ts            ← blacklist de tokens revocados
 ├── application/use-cases/
-│   ├── login.use-case.ts                    ← Valida credenciales, genera par de tokens
-│   ├── refresh-token.use-case.ts            ← Renueva el access token
-│   └── logout.use-case.ts                   ← Revoca tokens
+│   ├── login.use-case.ts
+│   ├── refresh-token.use-case.ts
+│   └── logout.use-case.ts
 ├── infrastructure/
-│   ├── persistence/                         ← Tabla users en PostgreSQL
+│   ├── persistence/                       ← tabla users en PostgreSQL
 │   ├── services/
-│   │   └── in-memory-token-store.service.ts ← Guarda tokens revocados en memoria
+│   │   └── in-memory-token-store.ts       ← tokens revocados en memoria
 │   ├── strategies/
-│   │   └── jwt.strategy.ts                  ← Cómo Passport valida el JWT
+│   │   └── jwt.strategy.ts                ← validación del JWT con Passport
 │   └── guards/
-│       ├── jwt-auth.guard.ts                ← ¿Tiene token válido?
-│       └── roles.guard.ts                   ← ¿Tiene el rol requerido?
+│       ├── jwt-auth.guard.ts              ← ¿tiene token válido?
+│       └── roles.guard.ts                 ← ¿tiene el rol requerido?
 └── interface/
-    └── controllers/auth.controller.ts        ← POST /auth/login, /refresh, /logout
+    └── controllers/auth.controller.ts     ← POST /auth/login, /refresh, /logout
 ```
 
-### Sistema JWT de doble token
+### Sistema de doble token JWT
 
 ```
-LOGIN:
-  Cliente envía email + password
-       ↓
-  Se verifica con bcrypt (timing-safe)
-       ↓
-  Se generan 2 tokens:
-    access_token  (válido 15 min) → para hacer peticiones
-    refresh_token (válido 7 días) → para renovar el access_token
+LOGIN
+  ↓ email + password
+  ↓ bcrypt.compare() — verifica contraseña
+  ↓ genera:
+      access_token  → expira en 15 min (para peticiones)
+      refresh_token → expira en 7 días  (para renovar el access_token)
 
-PETICIÓN AUTENTICADA:
-  Header: Authorization: Bearer <access_token>
-       ↓
-  JwtStrategy verifica la firma del token
-       ↓
-  Comprueba que no esté en la blacklist (tokens revocados)
-       ↓
-  Pone req.user = { id, email, role }
+PETICIÓN AUTENTICADA
+  ↓ Authorization: Bearer <access_token>
+  ↓ JwtStrategy verifica firma y expiración
+  ↓ comprueba que el token no esté en la blacklist
+  ↓ inyecta req.user = { id, email, role }
 
-LOGOUT:
-  access_token  → se añade a la blacklist (no sirve más)
-  refresh_token → se elimina del almacén activo
+LOGOUT
+  ↓ access_token  → se añade a la blacklist (invalidado inmediatamente)
+  ↓ refresh_token → se elimina del almacén activo
 ```
 
-**Pregunta de entrevista:** *¿Por qué dos tokens?*
-> El access token dura poco (15 min) para minimizar el riesgo si es robado. El refresh token dura más (7 días) y solo se usa para obtener un nuevo access token, no para acceder a recursos.
+**Por qué dos tokens:**
+El `access_token` tiene vida corta (15 min) para minimizar el riesgo si es interceptado. El `refresh_token` tiene vida larga (7 días) pero solo sirve para obtener un nuevo `access_token`, nunca para acceder a recursos directamente.
 
 ---
 
-## Carpeta `src/database/seeds/`
-
-Se ejecuta automáticamente cuando arranca la app. Crea los usuarios demo si la tabla está vacía.
-
-```typescript
-// Si no hay ningún usuario en la BD, crea admin y user
-async onApplicationBootstrap() {
-  const count = await this.userRepo.count();
-  if (count > 0) return;   // Ya hay datos, no hacer nada
-
-  await this.userRepo.save([
-    { email: 'admin@guitarras.dev', passwordHash: await bcrypt.hash('Admin123*', 10), role: 'admin' },
-    { email: 'user@guitarras.dev',  passwordHash: await bcrypt.hash('User123*', 10),  role: 'user'  },
-  ]);
-}
-```
-
----
-
-## Flujo completo de una petición `POST /api/v1/guitarras`
+## Flujo completo: POST /api/v1/guitarras
 
 ```
-1. main.ts          → ValidationPipe valida el body contra CreateGuitarDto
-                      (si falla → 422 automático)
+Request llega al servidor
+        │
+        ▼
+ValidationPipe          → valida body contra CreateGuitarDto
+                          si falla → 422 Unprocessable Entity (automático)
+        │
+        ▼
+JwtAuthGuard            → verifica token JWT en Authorization header
+                          si falta o expiró → 401 Unauthorized (automático)
+        │
+        ▼
+RolesGuard              → comprueba que req.user.role === 'admin'
+                          si no → 403 Forbidden (automático)
+        │
+        ▼
+GuitarsController       → extrae DTO del body, llama al caso de uso
+        │
+        ▼
+CreateGuitarUseCase     → ¿nombre duplicado? → 409 Conflict
+                        → Guitar.create(dto) → entidad con UUID
+                        → repo.save(guitar)
+        │
+        ▼
+GuitarTypeOrmRepository → Guitar → GuitarTypeOrmEntity (fromDomain)
+                        → INSERT en PostgreSQL
+                        → resultado → Guitar (toDomain)
+        │
+        ▼
+ResponseInterceptor     → envuelve la respuesta exitosa
 
-2. JwtAuthGuard     → verifica el token JWT en el header
-                      (si falta o expiró → 401 automático)
-
-3. RolesGuard       → verifica que req.user.role === 'admin'
-                      (si no es admin → 403 automático)
-
-4. GuitarsController.create()
-                    → extrae el body ya validado
-                    → llama a CreateGuitarUseCase.execute(dto)
-
-5. CreateGuitarUseCase
-                    → ¿ya existe una guitarra con ese nombre? → 409
-                    → Guitar.create(dto) → nueva entidad con UUID
-                    → repo.save(guitar)
-
-6. GuitarTypeOrmRepository.save()
-                    → convierte Guitar → GuitarTypeOrmEntity
-                    → INSERT en PostgreSQL
-                    → convierte resultado → Guitar
-
-7. ResponseInterceptor
-                    → envuelve la respuesta: { status: 'success', data: guitar }
-
-8. Cliente recibe:
+        ▼
+Response 201
 {
   "status": "success",
   "code": 201,
-  "data": { "id": "uuid", "name": "...", ... }
+  "data": { "id": "uuid-...", "name": "Gibson Les Paul", ... }
 }
 ```
 
 ---
 
-## Resumen de conceptos para la entrevista
+## Preguntas frecuentes de entrevista
+
+**¿Qué es la arquitectura hexagonal?**
+> Es un patrón que separa el núcleo del negocio (dominio + casos de uso) de los detalles técnicos (base de datos, HTTP, mensajería). La comunicación entre capas se hace a través de interfaces (puertos), que son implementadas por adaptadores concretos. Esto hace que el dominio sea testeable sin infraestructura y que los adaptadores sean intercambiables.
+
+**¿Por qué usas una interfaz para el repositorio?**
+> El caso de uso depende de la abstracción, no de la implementación. Si mañana cambia la base de datos o necesito un mock para tests, solo creo un nuevo adaptador que implemente la misma interfaz, sin tocar ninguna línea de lógica de negocio.
+
+**¿Qué es un módulo en NestJS?**
+> Un contenedor que agrupa controladores, servicios y configuración relacionada con una funcionalidad. NestJS construye un grafo de dependencias con todos los módulos para resolver las inyecciones automáticamente.
+
+**¿Cuándo usarías `synchronize: true`?**
+> Solo en desarrollo local. En producción es peligroso porque TypeORM puede alterar o eliminar columnas automáticamente. En producción se usan migraciones para tener control total y auditabilidad de los cambios de esquema.
+
+**¿Por qué dos tokens JWT?**
+> El `access_token` vive 15 minutos: si alguien lo roba, el daño es limitado. El `refresh_token` vive 7 días pero solo sirve para obtener un nuevo `access_token`, nunca para acceder a recursos directamente. Al hacer logout, el `access_token` se invalida en la blacklist inmediatamente, sin esperar a que expire.
+
+**¿Qué diferencia hay entre Guard, Pipe, Filter e Interceptor?**
+> - **Pipe**: transforma y valida la entrada antes de llegar al handler
+> - **Guard**: decide si la petición puede continuar (autenticación, autorización)
+> - **Interceptor**: envuelve la ejecución, puede modificar request y response
+> - **Filter**: captura excepciones y formatea la respuesta de error
+
+---
+
+## Tabla de conceptos clave
 
 | Concepto | Qué es | Ejemplo en este proyecto |
 |---|---|---|
-| **Módulo** | Agrupa controladores + servicios de una funcionalidad | `GuitarsModule`, `AuthModule` |
+| **Módulo** | Agrupa controladores + proveedores de una funcionalidad | `GuitarsModule`, `AuthModule` |
 | **Controller** | Maneja rutas HTTP | `GuitarsController` |
 | **Provider / Service** | Lógica inyectable | `CreateGuitarUseCase` |
 | **Guard** | Decide si la petición puede continuar | `JwtAuthGuard`, `RolesGuard` |
-| **Pipe** | Valida/transforma datos de entrada | `ValidationPipe` en `main.ts` |
+| **Pipe** | Valida y transforma datos de entrada | `ValidationPipe` en `main.ts` |
 | **Filter** | Captura excepciones | `HttpExceptionFilter` |
 | **Interceptor** | Envuelve ejecución (antes y después) | `ResponseInterceptor` |
-| **Decorator** | Metadatos sobre clases/métodos | `@Roles('admin')`, `@Get(':id')` |
-| **DTO** | Objeto que define la forma del input HTTP | `CreateGuitarDto` |
-| **Entity (dominio)** | Objeto de negocio puro | `Guitar` |
-| **Entity (TypeORM)** | Mapeo de tabla de BD | `GuitarTypeOrmEntity` |
+| **Decorator** | Adjunta metadatos a clases/métodos | `@Roles('admin')` |
+| **DTO** | Define y valida la forma del input HTTP | `CreateGuitarDto` |
+| **Entidad de dominio** | Objeto de negocio puro | `Guitar` |
+| **Entidad TypeORM** | Mapeo de tabla de BD | `GuitarTypeOrmEntity` |
 | **Puerto** | Interfaz que define un contrato | `GuitarRepositoryPort` |
 | **Adaptador** | Implementación concreta de un puerto | `GuitarTypeOrmRepository` |
+| **Caso de uso** | Acción atómica del sistema | `CreateGuitarUseCase` |
+| **Seed** | Datos iniciales al arrancar | `SeedModule` |
