@@ -9,6 +9,8 @@
 
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Arranque y configuración global](#arranque-y-configuración-global)
+- [Quick Start](#quick-start)
+- [Testear la API con Postman](#testear-la-api-con-postman)
 - [Configuración de base de datos](#configuración-de-base-de-datos)
 - [Capa compartida (shared)](#capa-compartida-shared)
 - [Módulo Guitars — Arquitectura Hexagonal](#módulo-guitars--arquitectura-hexagonal)
@@ -89,6 +91,355 @@ Módulo raíz que importa y conecta todos los módulos de la aplicación.
 })
 export class AppModule {}
 ```
+
+---
+
+## Quick Start
+
+### Prerrequisitos
+
+- **Node.js** 20 o superior
+- **Docker** y **Docker Compose** (para levantar PostgreSQL)
+- **npm** 10 o superior
+
+### 1 — Clonar y dependencias
+
+```bash
+git clone <repo-url>
+cd nest-api-guitarras
+npm install
+```
+
+### 2 — Variables de entorno
+
+Copia el archivo de ejemplo y ajústalo si necesitas cambiar las credenciales de base de datos o JWT:
+
+```bash
+cp .env.example .env
+```
+
+Variables disponibles:
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `PORT` | `3000` | Puerto donde corre la API |
+| `NODE_ENV` | `development` | `development` \| `production` |
+| `DB_HOST` | `localhost` | Host de PostgreSQL |
+| `DB_PORT` | `5432` | Puerto de PostgreSQL |
+| `DB_USERNAME` | `postgres` | Usuario de PostgreSQL |
+| `DB_PASSWORD` | `postgres` | Contraseña de PostgreSQL |
+| `DB_DATABASE` | `guitarras_db` | Nombre de la base de datos |
+| `JWT_ACCESS_SECRET` | _(generar uno nuevo)_ | Secreto para firmarsign el access token |
+| `JWT_REFRESH_SECRET` | _(generar uno nuevo)_ | Secreto para firmar el refresh token |
+| `JWT_ACCESS_EXPIRES_IN` | `15m` | Caducidad del access token |
+| `JWT_REFRESH_EXPIRES_IN` | `7d` | Caducidad del refresh token |
+| `DEMO_ADMIN_EMAIL` | `admin@guitarras.dev` | Email del usuario admin seed |
+| `DEMO_ADMIN_PASSWORD` | `Admin123*` | Contraseña del admin |
+| `DEMO_USER_EMAIL` | `user@guitarras.dev` | Email del usuario regular seed |
+| `DEMO_USER_PASSWORD` | `User123*` | Contraseña del usuario regular |
+
+### 3 — Levantar PostgreSQL
+
+#### Opción A — Con Docker (recomendada)
+
+```bash
+docker-compose up -d postgres
+```
+
+Esto levanta solo PostgreSQL. Luego en otra terminal:
+
+```bash
+npm run start:dev
+```
+
+La API estará disponible en `http://localhost:3000`. El seed creará automáticamente dos usuarios en la base de datos al arrancar.
+
+#### Opción B — Sin Docker (PostgreSQL local o en otro lado)
+
+1. Asegúrate de tener **PostgreSQL 16** corriendo.
+2. Crea la base de datos:
+
+```bash
+createdb guitarras_db -U postgres -h localhost -p 5432
+# te pedirá la contraseña (default: postgres)
+```
+
+3. Ajusta en `.env`:
+```
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+DB_DATABASE=guitarras_db
+```
+
+4. Levanta la API:
+```bash
+npm run start:dev
+```
+
+### 4 — Levantar en desarrollo (hot-reload)
+
+```bash
+npm run start:dev
+```
+
+### 5 — Tests
+
+```bash
+npm run test              # Tests unitarios
+npm run test:watch        # Tests unitarios en modo watch
+npm run test:cov          # Tests con coverage
+npm run test:e2e          # Tests end-to-end
+npm run lint              # Linter + formateo automático
+```
+
+### 6 — Producción
+
+```bash
+npm run build
+npm run start:prod
+```
+
+> En producción, cambia `synchronize: false` (usa migraciones en lugar de auto-sync) y genera secretos JWT fuertes con `openssl rand -base64 64`.
+
+---
+
+## Testear la API con Postman
+
+> Base URL: `http://localhost:3000/api/v1`
+> Todos los endpoints de guitarras requieren `Authorization: Bearer <access_token>`.
+
+### Paso 1 — Login (obtener tokens)
+
+**POST** `/api/v1/auth/login`
+
+**Headers:**
+```
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "email": "admin@guitarras.dev",
+  "password": "Admin123*"
+}
+```
+
+**Respuesta 200:**
+```json
+{
+  "status": "success",
+  "code": 200,
+  "message": "Autenticación exitosa",
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "id": "uuid-...",
+      "email": "admin@guitarras.dev",
+      "role": "admin"
+    }
+  }
+}
+```
+
+Copia el `accessToken` y configúralo en Postman como variable de colección o environment.
+
+### Paso 2 — Crear una guitarra (solo admin)
+
+**POST** `/api/v1/guitarras`
+
+**Headers:**
+```
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+```
+
+**Body:**
+```json
+{
+  "name": "Fender Stratocaster American Standard",
+  "brand": "Fender",
+  "model": "Stratocaster American Standard",
+  "body": "Stratocaster",
+  "color": "Sunburst",
+  "pickups": "Single Coil",
+  "strings": 6,
+  "value": 1599.99,
+  "stock": 5
+}
+```
+
+**Respuesta 201:**
+```json
+{
+  "status": "success",
+  "code": 201,
+  "message": "Guitarra creada correctamente",
+  "data": {
+    "id": "uuid-...",
+    "name": "Fender Stratocaster American Standard",
+    "brand": "Fender",
+    "value": 1599.99,
+    "stock": 5,
+    "createdAt": "2026-06-04T12:00:00.000Z"
+  }
+}
+```
+
+### Paso 3 — Listar guitarras (con paginación y búsqueda)
+
+**GET** `/api/v1/guitarras`
+
+**Headers:**
+```
+Authorization: Bearer {{accessToken}}
+```
+
+**Query params (todos opcionales):**
+
+| Param | Default | Descripción |
+|---|---|---|
+| `q` | — | Buscar por nombre, marca, modelo o color |
+| `sortBy` | `createdAt` | Campo de orden: `name`, `brand`, `value`, `createdAt` |
+| `order` | `asc` | Dirección: `asc` o `desc` |
+| `page` | `1` | Número de página |
+| `limit` | `10` | Items por página |
+
+**Ejemplo:** `GET /api/v1/guitarras?q=fender&page=1&limit=5&order=desc`
+
+**Respuesta 200:**
+```json
+{
+  "status": "success",
+  "code": 200,
+  "message": "Guitarras obtenidas correctamente",
+  "data": [
+    {
+      "id": "uuid-...",
+      "name": "Fender Stratocaster American Standard",
+      "brand": "Fender",
+      "value": 1599.99,
+      "stock": 5
+    }
+  ],
+  "meta": {
+    "total": 1,
+    "page": 1,
+    "limit": 10,
+    "totalPages": 1
+  }
+}
+```
+
+### Paso 4 — Obtener guitarra por ID
+
+**GET** `/api/v1/guitarras/:id`
+
+**Headers:** `Authorization: Bearer {{accessToken}}`
+
+**Respuesta 200:**
+```json
+{
+  "status": "success",
+  "code": 200,
+  "message": "Guitarra obtenida correctamente",
+  "data": {
+    "id": "uuid-...",
+    "name": "Fender Stratocaster American Standard",
+    "brand": "Fender",
+    "model": "Stratocaster American Standard",
+    "body": "Stratocaster",
+    "color": "Sunburst",
+    "pickups": "Single Coil",
+    "strings": 6,
+    "value": 1599.99,
+    "stock": 5,
+    "createdAt": "2026-06-04T12:00:00.000Z"
+  }
+}
+```
+
+### Paso 5 — Actualizar parcialmente (PATCH)
+
+**PATCH** `/api/v1/guitarras/:id`
+
+**Headers:**
+```
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+```
+
+**Body (campos parciales):**
+```json
+{
+  "stock": 3,
+  "value": 1499.99
+}
+```
+
+### Paso 6 — Eliminar guitarra
+
+**DELETE** `/api/v1/guitarras/:id`
+
+**Headers:** `Authorization: Bearer {{accessToken}}`
+
+**Respuesta 204** (sin contenido)
+
+### Paso 7 — Renovar access token
+
+**POST** `/api/v1/auth/refresh`
+
+**Headers:** `Content-Type: application/json`
+
+**Body:**
+```json
+{
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**Respuesta 200:** nuevo par de tokens.
+
+### Paso 8 — Logout
+
+**POST** `/api/v1/auth/logout`
+
+**Headers:**
+```
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+```
+
+**Body (opcional, para revoke también el refresh token):**
+```json
+{
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Resumen de endpoints
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| POST | `/api/v1/auth/login` | No | Login, devuelve access + refresh token |
+| POST | `/api/v1/auth/refresh` | No | Renovar tokens con refresh token |
+| POST | `/api/v1/auth/logout` | Sí | Revocar sesión |
+| GET | `/api/v1/guitarras` | Sí | Listar guitarras (paginación, búsqueda) |
+| GET | `/api/v1/guitarras/:id` | Sí | Obtener guitarra por ID |
+| POST | `/api/v1/guitarras` | Sí (admin) | Crear guitarra |
+| PUT | `/api/v1/guitarras/:id` | Sí (admin) | Reemplazar guitarra completa |
+| PATCH | `/api/v1/guitarras/:id` | Sí (admin) | Actualizar guitarra parcial |
+| DELETE | `/api/v1/guitarras/:id` | Sí (admin) | Eliminar guitarra |
+
+### Usuarios de prueba
+
+| Rol | Email | Password |
+|---|---|---|
+| Admin | `admin@guitarras.dev` | `Admin123*` |
+| User | `user@guitarras.dev` | `User123*` |
 
 ---
 
