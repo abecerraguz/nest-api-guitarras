@@ -601,37 +601,37 @@ Response 201
 
 **1. ¿Cómo estructurarías un módulo en NestJS siguiendo arquitectura hexagonal?**
 
-Lo divido en cuatro capas. En `domain` pongo las entidades y las interfaces de repositorio, sin ninguna dependencia externa, solo TypeScript puro. En `application` van los casos de uso, que orquestan el flujo usando esas interfaces. En `infrastructure` están las implementaciones concretas: el repositorio con TypeORM, clientes de servicios externos, etc. Y en `interface` está el controller HTTP con los DTOs. El módulo de NestJS actúa como pegamento: le dice al framework que cuando alguien pida `GuitarRepositoryPort`, le entregue `GuitarTypeOrmRepository`. Así puedo cambiar la base de datos sin tocar ni una línea de lógica de negocio.
+Lo divido en cuatro carpetas: `domain` con las entidades e interfaces de repositorio en TypeScript puro, `application` con los casos de uso, `infrastructure` con las implementaciones concretas como TypeORM, e `interface` con el controller y los DTOs. El módulo de NestJS actúa de pegamento: vincula la interfaz del repositorio con su implementación vía inyección de dependencias.
 
 ---
 
 **2. ¿Qué son los pipes globales y para qué sirve `ValidationPipe`?**
 
-Los pipes se ejecutan antes de que la petición llegue al controller. Los registré globalmente en `main.ts` para que apliquen a toda la aplicación. `ValidationPipe` revisa que el body cumpla las reglas declaradas en el DTO con decoradores como `@IsString()` o `@Min(0)`. Si algo no cumple, NestJS devuelve un 422 automáticamente con el detalle de cada campo inválido, sin que yo tenga que escribir esa lógica en ningún lado. También uso `whitelist: true` para que descarte silenciosamente cualquier campo que el cliente mande de más, y `transform: true` para que convierta automáticamente strings a números donde corresponde.
+Los pipes se ejecutan antes de que la petición llegue al controller. `ValidationPipe` valida el body contra las reglas del DTO y devuelve un 422 automáticamente si algo no cumple, sin escribir esa lógica en ningún side. Uso `whitelist: true` para descartar campos no declarados y `transform: true` para convertir tipos automáticamente.
 
 ---
 
-**3. ¿Cuál es la diferencia entre scope DEFAULT, REQUEST y TRANSIENT en NestJS?**
+**3. ¿Cuál es la diferencia entre scope DEFAULT, REQUEST y TRANSIENT?**
 
-DEFAULT es singleton: NestJS crea una sola instancia por módulo y la reutiliza en todas las peticiones. Es el más eficiente y el que uso en este proyecto para los casos de uso y repositorios. REQUEST crea una instancia nueva por cada petición HTTP, útil cuando necesito guardar estado específico de esa petición, como el usuario autenticado. TRANSIENT crea una instancia nueva cada vez que alguien inyecta esa clase, así que si tres providers la piden, hay tres instancias distintas. En la mayoría de los casos DEFAULT es suficiente y el más performante.
+DEFAULT crea un singleton por módulo, es el más eficiente y el que uso en este proyecto. REQUEST crea una instancia nueva por cada petición HTTP, útil cuando necesito contexto de la request. TRANSIENT crea una instancia nueva cada vez que alguien inyecta esa clase. Para la mayoría de casos, DEFAULT es suficiente.
 
 ---
 
-**4. ¿Cómo implementarías un sistema de manejo de errores global en NestJS?**
+**4. ¿Cómo implementarías manejo de errores global en NestJS?**
 
-Creando una clase que implemente `ExceptionFilter` y decorándola con `@Catch()`. En su método `catch` capturo la excepción, extraigo el código HTTP y el mensaje, y devuelvo siempre el mismo formato JSON con `status`, `code`, `message`, `timestamp` y `path`. Luego la registro en `main.ts` con `useGlobalFilters` para que aplique a toda la app. El resultado es que sin importar dónde se lance un error, el cliente siempre recibe la misma estructura. En este proyecto además creé una clase `ApiException` personalizada para poder lanzar errores de negocio con su código HTTP directamente desde los casos de uso.
+Creo una clase que implementa `ExceptionFilter`, la decoro con `@Catch()` y la registro en `main.ts` con `useGlobalFilters`. Desde ahí capturo cualquier excepción y devuelvo siempre el mismo JSON con `status`, `code`, `message`, `timestamp` y `path`. En este proyecto además tengo una clase `ApiException` para lanzar errores de negocio con su código HTTP desde los casos de uso.
 
 ---
 
 **5. ¿En qué se diferencian Guard e Interceptor?**
 
-El Guard responde una pregunta binaria: ¿esta petición puede continuar? Devuelve true o false. Si devuelve false, NestJS corta el flujo antes de que llegue al controller. Lo uso para autenticación con `JwtAuthGuard` y para autorización con `RolesGuard`. El Interceptor en cambio envuelve la ejecución completa del handler, puede hacer algo antes y algo después. Lo uso para formatear todas las respuestas exitosas con la misma estructura en `ResponseInterceptor`. La diferencia clave es que el Guard decide si ejecutar, y el Interceptor transforma lo que ocurre antes y después de ejecutar.
+El Guard decide si la petición puede continuar, devuelve true o false. El Interceptor envuelve la ejecución y puede actuar antes y después del handler. En este proyecto, `JwtAuthGuard` y `RolesGuard` son guards; `ResponseInterceptor`, que formatea todas las respuestas exitosas, es un interceptor.
 
 ---
 
 **6. ¿Cómo implementarías comunicación entre microservicios en NestJS?**
 
-Depende del caso. Si necesito comunicación sincrónica, usaría HTTP entre servicios o gRPC para mayor eficiencia. Si necesito comunicación asíncrona y desacoplada, usaría mensajería: en Azure, Service Bus es la opción natural con colas para mensajes punto a punto o topics para pub/sub. NestJS tiene soporte nativo para esto con `ClientProxy` y transporters. También consideraría el patrón CQRS con `@nestjs/cqrs` si quiero separar comandos de consultas dentro de un mismo servicio antes de partir a microservicios.
+Para comunicación sincrónica usaría HTTP o gRPC. Para asíncrona, en Azure usaría Service Bus con colas para mensajes punto a punto o topics para pub/sub. NestJS tiene soporte nativo con `ClientProxy`. Si la separación es dentro del mismo servicio, también consideraría CQRS con `@nestjs/cqrs`.
 
 ---
 
@@ -639,25 +639,25 @@ Depende del caso. Si necesito comunicación sincrónica, usaría HTTP entre serv
 
 **7. ¿Qué es la regla de dependencia?**
 
-Es la regla fundamental: las dependencias siempre apuntan hacia adentro. Infraestructura puede conocer a aplicación, aplicación puede conocer a dominio, pero el dominio no importa nada de nadie. En la práctica esto significa que la entidad `Guitar` es TypeScript puro, sin decoradores de NestJS, sin columnas de TypeORM, sin nada. Si abro ese archivo y no veo ningún import de una librería externa, la arquitectura está bien aplicada. Esto es lo que permite testear el dominio de forma completamente aislada.
+Las dependencias siempre apuntan hacia adentro: infraestructura conoce a aplicación, aplicación conoce a dominio, pero el dominio no importa nada externo. En la práctica, si abro `guitar.entity.ts` y no veo ningún import de NestJS ni TypeORM, la arquitectura está bien aplicada.
 
 ---
 
 **8. Dame un ejemplo concreto de puerto y adaptador en este proyecto.**
 
-El puerto es `GuitarRepositoryPort`, una interfaz en la capa de dominio que define qué operaciones existen: `findAll`, `findById`, `save`, `delete`. No tiene ninguna implementación, es solo el contrato. El adaptador es `GuitarTypeOrmRepository`, una clase en infraestructura que implementa esa interfaz usando TypeORM y PostgreSQL. En el módulo le digo a NestJS: cuando alguien pida `GUITAR_REPOSITORY_PORT`, entrégale `GuitarTypeOrmRepository`. Los casos de uso nunca saben que existe TypeORM; solo saben que hay algo que cumple ese contrato.
+El puerto es `GuitarRepositoryPort`, una interfaz en dominio que define `findAll`, `findById`, `save` y `delete`. El adaptador es `GuitarTypeOrmRepository`, que implementa esa interfaz con TypeORM. En el módulo vinculo ambos con `provide/useClass`, así los casos de uso nunca saben que existe TypeORM.
 
 ---
 
 **9. ¿Cómo evitas que la lógica de negocio se filtre hacia infraestructura?**
 
-Poniéndola en la entidad de dominio y en los casos de uso. Por ejemplo, la regla de que una guitarra nueva necesita un UUID generado automáticamente vive en `Guitar.create()`. La regla de que no pueden existir dos guitarras con el mismo nombre vive en `CreateGuitarUseCase`. Los adaptadores solo se encargan de traducir entre formatos: convierten de una entidad de dominio a una fila de base de datos con `fromDomain()` y de vuelta con `toDomain()`. Cuando un adaptador empieza a tener ifs con lógica de negocio, es una señal de que algo está mal.
+La lógica vive en la entidad y en los casos de uso. `Guitar.create()` genera el UUID, `CreateGuitarUseCase` valida que no haya nombre duplicado. Los adaptadores solo traducen entre formatos con `toDomain()` y `fromDomain()`, sin ninguna regla de negocio dentro.
 
 ---
 
 **10. ¿Cómo harías testing de los casos de uso sin base de datos?**
 
-Creando un repositorio in-memory que implementa la misma interfaz `GuitarRepositoryPort`. Es una clase simple que guarda los datos en un array en memoria, sin ninguna conexión a PostgreSQL. En el test inyecto ese repositorio falso en lugar del real, y puedo probar toda la lógica del caso de uso, incluyendo sus reglas de negocio, en milisegundos y sin infraestructura. Eso también acelera bastante el pipeline de CI porque los tests unitarios corren muy rápido.
+Creo un repositorio in-memory que implementa `GuitarRepositoryPort` con un simple array. En el test inyecto ese repositorio en lugar del real y puedo probar toda la lógica de negocio en milisegundos, sin levantar ninguna infraestructura.
 
 ---
 
@@ -665,19 +665,19 @@ Creando un repositorio in-memory que implementa la misma interfaz `GuitarReposit
 
 **11. ¿Cuándo elegirías Azure App Service vs Azure Functions?**
 
-App Service para servicios con tráfico constante o predecible, como esta API. Se paga por tiempo de ejecución continuo y no hay cold start. Azure Functions para procesos esporádicos o event-driven: un job que corre cuando llega un mensaje a una cola, o un webhook que se dispara pocas veces al día. NestJS específicamente no es ideal en Functions porque su proceso de bootstrapping es pesado y genera cold starts notorios. Si igual necesito NestJS en Functions, usaría la estrategia de mantener la instancia caliente.
+App Service para APIs con tráfico constante como esta, sin cold start. Functions para procesos esporádicos o event-driven como jobs o webhooks. NestJS específicamente no encaja bien en Functions porque su bootstrapping genera cold starts pesados.
 
 ---
 
 **12. ¿Cómo manejarías secretos en Azure sin hardcodear credenciales?**
 
-Con Azure Key Vault y Managed Identity. La idea es que el servicio tenga una identidad en Azure Active Directory y se le dé permiso de leer secretos de Key Vault, sin ninguna contraseña en el código ni en variables de entorno. En App Service puedo referenciar secretos de Key Vault directamente como variables de entorno con una sintaxis especial, así la aplicación los lee igual que un `.env` normal pero el valor viene de Key Vault. Esto también resuelve la rotación de secretos: se cambia en Key Vault y todos los servicios lo reciben sin redeploy.
+Con Azure Key Vault y Managed Identity. El servicio recibe una identidad en Azure AD con permisos de lectura en Key Vault, y los secretos se referencian como variables de entorno en App Service. Sin contraseñas en el código y con rotación de secretos sin necesidad de redeploy.
 
 ---
 
 **13. ¿Cómo escalarías horizontalmente este servicio?**
 
-Con scale out en App Service basado en métricas de CPU o memoria. Pero antes habría que resolver una deuda técnica que tiene este proyecto: el `in-memory-token-store` donde guarda los tokens revocados. Si hay tres instancias corriendo, cada una tiene su propia memoria, entonces un token revocado en una instancia sigue siendo válido en las otras dos. La solución es mover esa blacklist a Redis o a una tabla en PostgreSQL, algo compartido entre todas las instancias. Con eso resuelto, el servicio es completamente stateless y escala sin problema.
+Con scale out en App Service. Pero primero resolvería la deuda técnica del `in-memory-token-store`: si hay múltiples instancias, cada una tiene su propia blacklist y los tokens revocados no se comparten. La solución es mover esa blacklist a Redis, que es externo y compartido por todas las instancias.
 
 ---
 
@@ -685,13 +685,13 @@ Con scale out en App Service basado en métricas de CPU o memoria. Pero antes ha
 
 **14. Describe el pipeline CI/CD de este proyecto.**
 
-El pipeline está en `.github/workflows/`. El flujo típico es: primero lint y formateo para asegurar consistencia de código, luego tests unitarios, luego build de TypeScript, luego build de la imagen Docker, luego push al container registry de Azure, y finalmente deploy al App Service. Un detalle importante es que las migraciones de base de datos corren como un paso separado antes del deploy, no dentro de la aplicación al arrancar. Así puedo hacer rollback del código sin afectar el esquema de la base de datos.
+Está en `.github/workflows/`. El flujo es: lint → tests unitarios → build TypeScript → build imagen Docker → push al container registry de Azure → deploy a App Service. Las migraciones corren como paso separado antes del deploy, no al arrancar la app, para poder hacer rollback de código sin afectar el esquema.
 
 ---
 
 **15. ¿Por qué `synchronize: false` en producción?**
 
-Porque `synchronize: true` le da a TypeORM libertad total para modificar el esquema de la base de datos automáticamente al arrancar. En desarrollo es cómodo porque no tengo que escribir migraciones. Pero en producción es peligroso: si cambio el nombre de una propiedad en la entidad, TypeORM podría eliminar la columna antigua con todos sus datos. Las migraciones son la alternativa segura: son archivos versionados que describen exactamente qué cambia, son revisables en pull request, y son reversibles con `migration:revert`.
+Porque con `true`, TypeORM puede alterar o eliminar columnas automáticamente si el esquema cambia, lo que puede causar pérdida de datos. Las migraciones son la alternativa segura: son versionadas, revisables en PR y reversibles con `migration:revert`.
 
 ---
 
@@ -699,13 +699,13 @@ Porque `synchronize: true` le da a TypeORM libertad total para modificar el esqu
 
 **16. ¿Cómo manejas paginación con TypeORM?**
 
-Uso `createQueryBuilder` con `.skip()` y `.take()` para el offset y el límite, y `getManyAndCount()` que en una sola query trae tanto los registros como el total. Con eso calculo `totalPages` y armo el objeto `meta` que devuelvo junto a los items. También permito ordenar por cualquier columna pasando `sortBy` y `order` como query params, validados en el DTO para evitar SQL injection.
+Con `createQueryBuilder`, `.skip()`, `.take()` y `getManyAndCount()`, que trae los registros y el total en una sola query. Con eso armo el objeto `meta` con `total`, `page` y `totalPages` que devuelvo junto a los items.
 
 ---
 
 **17. ¿Qué problema tiene el token store en memoria al escalar?**
 
-Que la memoria no se comparte entre instancias. Si el load balancer manda mi petición de logout a la instancia A, esa instancia guarda el token en su blacklist local. Pero si la próxima petición con ese mismo token llega a la instancia B, B no sabe que fue revocado y lo acepta. Para producción real esto debe moverse a Redis, que es un almacén en memoria pero externo y compartido entre todas las instancias. Redis es ideal para esto porque puedo además setear un TTL igual a la expiración del token para que se limpie solo.
+Que cada instancia tiene su propia memoria. Un token revocado en la instancia A sigue válido en la instancia B porque no comparten estado. La solución es Redis: externo, compartido entre instancias, y con TTL para que los tokens expirados se limpien solos.
 
 ---
 
@@ -713,19 +713,19 @@ Que la memoria no se comparte entre instancias. Si el load balancer manda mi pet
 
 **18. Cuéntame de un proyecto donde hayas aplicado buena separación de responsabilidades.**
 
-En este proyecto de Guitarras API aplicamos arquitectura hexagonal desde el inicio. El problema que queríamos evitar era terminar con un service de NestJS que mezclara validaciones, reglas de negocio, queries SQL y transformaciones de datos en el mismo archivo. La decisión fue separar en cuatro capas claras, donde el dominio no sabe nada del framework ni de la base de datos. El resultado fue que podemos testear todos los casos de uso sin levantar la base de datos, y cuando necesitamos cambiar cómo se persiste algo, sabemos exactamente en qué archivo tocar.
+En este proyecto de Guitarras API aplicamos arquitectura hexagonal para evitar servicios que mezclen validaciones, reglas de negocio y queries SQL en el mismo archivo. El resultado fue que podemos testear los casos de uso sin base de datos y cambiar la capa de persistencia sin tocar la lógica de negocio.
 
 ---
 
 **19. ¿Cómo convencerías a tu equipo de adoptar arquitectura hexagonal en un proyecto en marcha?**
 
-No propondría reescribir todo de golpe porque eso genera resistencia y riesgo. Lo haría incrementalmente, módulo a módulo. Empezaría por el módulo más crítico o el que más problemas da, lo refactorizo con la nueva estructura, muestro que los tests son más rápidos y que el código es más fácil de entender para alguien nuevo. Con ese ejemplo concreto es mucho más fácil que el equipo quiera aplicarlo al siguiente módulo. También es importante documentar la estructura esperada, como este README, para que no haya ambigüedad sobre dónde va cada cosa.
+No propondría reescribir todo de golpe. Empezaría por el módulo más problemático, lo refactorizo, muestro que los tests son más rápidos y el código más legible. Con ese ejemplo concreto es mucho más fácil que el equipo quiera aplicarlo al siguiente módulo.
 
 ---
 
 **20. ¿Qué harías si hay presión para entregar rápido y la calidad sufre?**
 
-Lo primero es hacer visible la deuda técnica. En vez de simplemente hacerlo rápido y callarse, creo un ticket en el backlog describiendo exactamente qué se hizo raro y por qué, con la estimación de cuánto cuesta arreglarlo después. Eso convierte la deuda en algo concreto y priorizable, no en una sensación vaga de que el código está mal. También trato de identificar qué parte de la calidad es innegociable: por ejemplo, puedo saltarme algunos tests de integración bajo presión, pero nunca voy a dejar `synchronize: true` en producción ni credenciales hardcodeadas en el código. Hay un piso mínimo que no se negocia.
+Hago visible la deuda técnica creando un ticket con lo que se hizo rápido y el costo estimado de arreglarlo después. Eso la convierte en algo priorizable. Y mantengo un piso mínimo innegociable: nunca `synchronize: true` en producción, nunca credenciales hardcodeadas, sin importar la presión.
 
 ---
 
