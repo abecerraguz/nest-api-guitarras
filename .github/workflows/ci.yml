@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'nest-api/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'nest-api/**'
+
+defaults:
+  run:
+    working-directory: nest-api
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Lint + Build + Unit Tests
+  # ─────────────────────────────────────────────────────────────
+  test:
+    name: Lint, Build & Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: nest-api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test -- --coverage --passWithNoTests
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: nest-api/coverage/
+
+  # ─────────────────────────────────────────────────────────────
+  # Integration Tests (con PostgreSQL)
+  # ─────────────────────────────────────────────────────────────
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: test
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: guitarras_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 3000
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: guitarras_test
+      JWT_ACCESS_SECRET: test-access-secret
+      JWT_REFRESH_SECRET: test-refresh-secret
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      DEMO_ADMIN_EMAIL: admin@test.dev
+      DEMO_ADMIN_PASSWORD: Admin123*
+      DEMO_USER_EMAIL: user@test.dev
+      DEMO_USER_PASSWORD: User123*
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: nest-api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run e2e tests
+        run: npm run test:e2e --passWithNoTests
+
+  # ─────────────────────────────────────────────────────────────
+  # Docker Build Validation
+  # ─────────────────────────────────────────────────────────────
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./nest-api
+          push: false
+          tags: guitarras-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,60 @@
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: .
+      target: builder   # Usa la etapa de builder para hot-reload
+    container_name: guitarras-api
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: guitarras_db
+      JWT_ACCESS_SECRET: dev-access-secret
+      JWT_REFRESH_SECRET: dev-refresh-secret
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      DEMO_ADMIN_EMAIL: admin@guitarras.dev
+      DEMO_ADMIN_PASSWORD: Admin123*
+      DEMO_USER_EMAIL: user@guitarras.dev
+      DEMO_USER_PASSWORD: User123*
+    command: npm run start:dev
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - guitarras-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: guitarras-postgres
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: guitarras_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - guitarras-net
+
+volumes:
+  postgres_data:
+
+networks:
+  guitarras-net:
+    driver: bridge
